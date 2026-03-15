@@ -1,4 +1,170 @@
-// ── DOM refs ──────────────────────────────────────────────────────────────────
+// ── Firebase imports ──────────────────────────────────────────────────────────
+import { initializeApp }                          from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
+import { getAuth, onAuthStateChanged, signOut,
+         signInWithEmailAndPassword,
+         createUserWithEmailAndPassword,
+         GoogleAuthProvider, signInWithPopup }    from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+
+// ── Firebase config ───────────────────────────────────────────────────────────
+const firebaseConfig = {
+  apiKey:            "AIzaSyDWqSi2Is6YLcwKPf-A2A5ekbk2QEd52MQ",
+  authDomain:        "tsa-sound-detector.firebaseapp.com",
+  projectId:         "tsa-sound-detector",
+  storageBucket:     "tsa-sound-detector.firebasestorage.app",
+  messagingSenderId: "895425942202",
+  appId:             "1:895425942202:web:727262b3c1d2e20e6b2883",
+  measurementId:     "G-55MMLXL9XC",
+};
+
+const app            = initializeApp(firebaseConfig);
+const auth           = getAuth(app);
+const googleProvider = new GoogleAuthProvider();
+
+// ── Auth UI refs ──────────────────────────────────────────────────────────────
+const authScreen      = document.getElementById('authScreen');
+const mainApp         = document.getElementById('mainApp');
+const authError       = document.getElementById('authError');
+const userEmailEl     = document.getElementById('userEmail');
+const tabSignIn       = document.getElementById('tabSignIn');
+const tabSignUp       = document.getElementById('tabSignUp');
+const emailInput      = document.getElementById('emailInput');
+const passInput       = document.getElementById('passInput');
+const passConfirmRow  = document.getElementById('passConfirmRow');
+const passConfirmInput= document.getElementById('passConfirmInput');
+const signInBtn       = document.getElementById('signInBtn');
+const signUpBtn       = document.getElementById('signUpBtn');
+const googleBtn       = document.getElementById('googleBtn');
+const signOutBtn      = document.getElementById('signOutBtn');
+
+// ── Auth helpers ──────────────────────────────────────────────────────────────
+function setAuthError(msg) {
+  authError.textContent   = msg;
+  authError.style.display = msg ? 'block' : 'none';
+}
+
+function setLoading(btn, on) {
+  btn.disabled = on;
+  if (!btn._orig) btn._orig = btn.textContent;
+  btn.textContent = on ? 'Please wait…' : btn._orig;
+}
+
+function friendlyError(code) {
+  const map = {
+    'auth/user-not-found':         'No account found with that email.',
+    'auth/wrong-password':         'Incorrect password.',
+    'auth/invalid-credential':     'Incorrect email or password.',
+    'auth/email-already-in-use':   'An account with that email already exists.',
+    'auth/invalid-email':          'Please enter a valid email address.',
+    'auth/weak-password':          'Password must be at least 6 characters.',
+    'auth/popup-closed-by-user':   'Sign-in popup was closed.',
+    'auth/network-request-failed': 'Network error — check your connection.',
+  };
+  return map[code] || 'Something went wrong. Please try again.';
+}
+
+// ── Auth tab switching ────────────────────────────────────────────────────────
+tabSignIn.onclick = () => {
+  tabSignIn.classList.add('active'); tabSignUp.classList.remove('active');
+  passConfirmRow.style.display = 'none';
+  signInBtn.style.display = 'block'; signUpBtn.style.display = 'none';
+  setAuthError('');
+};
+tabSignUp.onclick = () => {
+  tabSignUp.classList.add('active'); tabSignIn.classList.remove('active');
+  passConfirmRow.style.display = 'block';
+  signUpBtn.style.display = 'block'; signInBtn.style.display = 'none';
+  setAuthError('');
+};
+
+// ── Sign in / sign up / Google ────────────────────────────────────────────────
+signInBtn.onclick = async () => {
+  setAuthError('');
+  setLoading(signInBtn, true);
+  try {
+    await signInWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+  } catch (e) { setAuthError(friendlyError(e.code)); }
+  finally     { setLoading(signInBtn, false); }
+};
+
+signUpBtn.onclick = async () => {
+  setAuthError('');
+  if (passInput.value !== passConfirmInput.value) {
+    setAuthError("Passwords don't match."); return;
+  }
+  setLoading(signUpBtn, true);
+  try {
+    await createUserWithEmailAndPassword(auth, emailInput.value.trim(), passInput.value);
+  } catch (e) { setAuthError(friendlyError(e.code)); }
+  finally     { setLoading(signUpBtn, false); }
+};
+
+googleBtn.onclick = async () => {
+  setAuthError('');
+  setLoading(googleBtn, true);
+  try {
+    await signInWithPopup(auth, googleProvider);
+  } catch (e) { setAuthError(friendlyError(e.code)); setLoading(googleBtn, false); }
+};
+
+signOutBtn.onclick = () => {
+  stopListening();
+  signOut(auth);
+};
+
+// ── Auth state ────────────────────────────────────────────────────────────────
+onAuthStateChanged(auth, user => {
+  if (user) {
+    authScreen.style.display = 'none';
+    mainApp.style.display    = 'block';
+    userEmailEl.textContent  = user.displayName || user.email;
+  } else {
+    authScreen.style.display = 'flex';
+    mainApp.style.display    = 'none';
+    stopListening();
+  }
+});
+
+// ── Sound definitions ─────────────────────────────────────────────────────────
+const SOUNDS = [
+  { id: 'smoke',     idx: 393, label: 'Smoke Detector',    emoji: '🚨', tier: 'danger', notif: 'Smoke detector going off!' },
+  { id: 'siren',     idx: 390, label: 'Siren',             emoji: '🚨', tier: 'danger', notif: 'Siren detected nearby.' },
+  { id: 'glass',     idx: 437, label: 'Glass Shatter',     emoji: '💥', tier: 'danger', notif: 'Glass breaking detected!' },
+  { id: 'baby',      idx:  22, label: 'Baby Crying',       emoji: '👶', tier: 'warn',   notif: 'Baby crying detected.' },
+  { id: 'vehhorn',   idx: 302, label: 'Vehicle Horn',      emoji: '📯', tier: 'warn',   notif: 'Vehicle horn detected.' },
+  { id: 'trainhorn', idx: 325, label: 'Train Horn',        emoji: '🚂', tier: 'warn',   notif: 'Train horn detected.' },
+  { id: 'reversing', idx: 313, label: 'Reversing Beeps',   emoji: '🔁', tier: 'warn',   notif: 'Reversing vehicle detected.' },
+  { id: 'doorbell',  idx: 350, label: 'Doorbell',          emoji: '🔔', tier: 'info',   notif: 'Someone rang the doorbell.' },
+  { id: 'knock',     idx: 353, label: 'Knock',             emoji: '✊', tier: 'info',   notif: 'Knock at the door detected.' },
+  { id: 'phone',     idx: 384, label: 'Telephone Ringing', emoji: '📞', tier: 'info',   notif: 'Telephone ringing.' },
+  { id: 'alarm',     idx: 389, label: 'Alarm Clock',       emoji: '⏰', tier: 'info',   notif: 'Alarm clock going off.' },
+  { id: 'buzzer',    idx: 392, label: 'Buzzer',            emoji: '📳', tier: 'info',   notif: 'Buzzer detected.' },
+  { id: 'microwave', idx: 362, label: 'Microwave',         emoji: '📡', tier: 'info',   notif: 'Microwave beep detected.' },
+  { id: 'dog',       idx:  74, label: 'Dog Barking',       emoji: '🐕', tier: 'info',   notif: 'Dog barking detected.' },
+  { id: 'vacuum',    idx: 371, label: 'Vacuum Cleaner',    emoji: '🌀', tier: 'info',   notif: 'Vacuum cleaner detected.' },
+];
+
+// ── Audio / model config ──────────────────────────────────────────────────────
+const YAMNET_SR      = 16000;
+const WINDOW_SECS    = 1.5;
+const INFERENCE_MS   = 750;
+const COOLDOWN       = 3000;
+const YAMNET_MODEL_URL = 'https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1';
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let model          = null;
+let audioCtx       = null;
+let sourceNode     = null;
+let processorNode  = null;
+let rawSamples     = [];
+let nativeSR       = 44100;
+let inferenceTimer = null;
+let listening      = false;
+let lastTrigger    = 0;
+let THRESHOLD      = 0.20;
+
+const enabled = Object.fromEntries(SOUNDS.map(s => [s.id, true]));
+
+// ── App DOM refs ──────────────────────────────────────────────────────────────
 const statusEl        = document.getElementById('status');
 const statusOrb       = document.getElementById('statusOrb');
 const startBtn        = document.getElementById('startBtn');
@@ -13,68 +179,20 @@ const thresholdSlider = document.getElementById('thresholdSlider');
 const thresholdVal    = document.getElementById('thresholdVal');
 const clearLogBtn     = document.getElementById('clearLog');
 
-// ── Sound definitions ─────────────────────────────────────────────────────────
-// tier: 'danger' = red alert, 'warn' = amber, 'info' = blue
-const SOUNDS = [
-  { id: 'smoke',     idx: 393, label: 'Smoke Detector',       emoji: '🚨', tier: 'danger', notif: 'Smoke detector going off!' },
-  { id: 'siren',     idx: 390, label: 'Siren',                emoji: '🚨', tier: 'danger', notif: 'Siren detected nearby.' },
-  { id: 'glass',     idx: 437, label: 'Glass Shatter',        emoji: '💥', tier: 'danger', notif: 'Glass breaking detected!' },
-  { id: 'baby',      idx:  22, label: 'Baby Crying',          emoji: '👶', tier: 'warn',   notif: 'Baby crying detected.' },
-  { id: 'vehhorn',   idx: 302, label: 'Vehicle Horn',         emoji: '📯', tier: 'warn',   notif: 'Vehicle horn detected.' },
-  { id: 'trainhorn', idx: 325, label: 'Train Horn',           emoji: '🚂', tier: 'warn',   notif: 'Train horn detected.' },
-  { id: 'reversing', idx: 313, label: 'Reversing Beeps',      emoji: '🔁', tier: 'warn',   notif: 'Reversing vehicle detected.' },
-  { id: 'doorbell',  idx: 350, label: 'Doorbell',             emoji: '🔔', tier: 'info',   notif: 'Someone rang the doorbell.' },
-  { id: 'knock',     idx: 353, label: 'Knock',                emoji: '✊', tier: 'info',   notif: 'Knock at the door detected.' },
-  { id: 'phone',     idx: 384, label: 'Telephone Ringing',    emoji: '📞', tier: 'info',   notif: 'Telephone ringing.' },
-  { id: 'alarm',     idx: 389, label: 'Alarm Clock',          emoji: '⏰', tier: 'info',   notif: 'Alarm clock going off.' },
-  { id: 'buzzer',    idx: 392, label: 'Buzzer',               emoji: '📳', tier: 'info',   notif: 'Buzzer detected.' },
-  { id: 'microwave', idx: 362, label: 'Microwave',            emoji: '📡', tier: 'info',   notif: 'Microwave beep detected.' },
-  { id: 'dog',       idx:  74, label: 'Dog Barking',          emoji: '🐕', tier: 'info',   notif: 'Dog barking detected.' },
-  { id: 'vacuum',    idx: 371, label: 'Vacuum Cleaner',       emoji: '🌀', tier: 'info',   notif: 'Vacuum cleaner detected.' },
-];
-
-// ── Audio / model config ──────────────────────────────────────────────────────
-const YAMNET_SR      = 16000;
-const WINDOW_SECS    = 1.5;
-const WINDOW_SAMPLES = YAMNET_SR * WINDOW_SECS;
-const INFERENCE_MS   = 750;
-const COOLDOWN       = 3000;
-const YAMNET_MODEL_URL = 'https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1';
-
-// ── State ─────────────────────────────────────────────────────────────────────
-let model         = null;
-let audioCtx      = null;
-let sourceNode    = null;
-let processorNode = null;
-let rawSamples    = [];
-let nativeSR      = 44100;
-let inferenceTimer = null;
-let listening     = false;
-let lastTrigger   = 0;
-let THRESHOLD     = 0.20;
-
-// Per-sound enable state (all on by default)
-const enabled = Object.fromEntries(SOUNDS.map(s => [s.id, true]));
-
-// ── Settings panel — build sound toggles dynamically ─────────────────────────
+// ── Sound toggle builder ──────────────────────────────────────────────────────
 function buildSoundToggles() {
   const container = document.getElementById('soundToggles');
-  if (!container) return;
-
   const groups = [
-    { label: '🚨 Emergency',  tier: 'danger' },
-    { label: '⚠️ Traffic & Safety', tier: 'warn' },
-    { label: 'ℹ️ Everyday',   tier: 'info'   },
+    { label: '🚨 Emergency',          tier: 'danger' },
+    { label: '⚠️ Traffic & Safety',   tier: 'warn'   },
+    { label: 'ℹ️ Everyday',           tier: 'info'   },
   ];
-
   groups.forEach(g => {
-    const sounds = SOUNDS.filter(s => s.tier === g.tier);
     const header = document.createElement('div');
     header.className = 'toggle-group-label';
     header.textContent = g.label;
     container.appendChild(header);
-
-    sounds.forEach(s => {
+    SOUNDS.filter(s => s.tier === g.tier).forEach(s => {
       const row = document.createElement('div');
       row.className = 'setting-row sound-row';
       row.innerHTML = `
@@ -84,8 +202,7 @@ function buildSoundToggles() {
           <span class="toggle-slider"></span>
         </label>`;
       container.appendChild(row);
-
-      row.querySelector(`#snd-${s.id}`).addEventListener('change', (e) => {
+      row.querySelector(`#snd-${s.id}`).addEventListener('change', e => {
         enabled[s.id] = e.target.checked;
       });
     });
@@ -175,21 +292,19 @@ async function resampleTo16k(samples, fromSR) {
 // ── Inference ─────────────────────────────────────────────────────────────────
 async function runInference() {
   if (!model || !listening) return;
-
   const needed = Math.ceil(nativeSR * WINDOW_SECS);
   if (rawSamples.length < needed) return;
 
   const snap = Float32Array.from(rawSamples.slice(-needed));
-
   let waveform, scores16, meanScores, scoresArr;
   try {
     const samples16 = await resampleTo16k(snap, nativeSR);
     const clamped   = samples16.map(v => Math.max(-1, Math.min(1, v)));
-    waveform    = tf.tensor1d(clamped);
-    const out   = model.execute({ waveform });
-    scores16    = Array.isArray(out) ? out[0] : out;
-    meanScores  = tf.mean(scores16, 0);
-    scoresArr   = await meanScores.array();
+    waveform   = tf.tensor1d(clamped);
+    const out  = model.execute({ waveform });
+    scores16   = Array.isArray(out) ? out[0] : out;
+    meanScores = tf.mean(scores16, 0);
+    scoresArr  = await meanScores.array();
   } catch (err) {
     addLog('Inference error: ' + err.message);
     return;
@@ -202,14 +317,12 @@ async function runInference() {
   const now = Date.now();
   if (now - lastTrigger <= COOLDOWN) return;
 
-  // Find the highest-scoring enabled sound that exceeds threshold
   let best = null, bestScore = 0;
   for (const sound of SOUNDS) {
     if (!enabled[sound.id]) continue;
     const score = scoresArr[sound.idx] ?? 0;
     if (score >= THRESHOLD && score > bestScore) {
-      best = sound;
-      bestScore = score;
+      best = sound; bestScore = score;
     }
   }
 
@@ -243,7 +356,7 @@ async function startListening() {
   processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
 
   const maxBuf = nativeSR * 6;
-  processorNode.onaudioprocess = (e) => {
+  processorNode.onaudioprocess = e => {
     const chunk = e.inputBuffer.getChannelData(0);
     rawSamples.push(...chunk);
     if (rawSamples.length > maxBuf)
@@ -272,16 +385,14 @@ function stopListening() {
   processorNode = sourceNode = audioCtx = null;
   rawSamples    = [];
   listening     = false;
-
-  startBtn.disabled = false;
-  stopBtn.disabled  = true;
-  statusEl.textContent = 'Stopped';
-  statusOrb.classList.remove('listening');
+  if (startBtn) startBtn.disabled = false;
+  if (stopBtn)  stopBtn.disabled  = true;
+  if (statusEl) statusEl.textContent = 'Stopped';
+  if (statusOrb) statusOrb.classList.remove('listening');
   addLog('Stopped listening.');
 }
 
 startBtn.onclick = startListening;
 stopBtn.onclick  = stopListening;
 
-// Init
 buildSoundToggles();
