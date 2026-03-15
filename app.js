@@ -1,45 +1,96 @@
 // ── DOM refs ──────────────────────────────────────────────────────────────────
-const statusEl       = document.getElementById('status');
-const statusOrb      = document.getElementById('statusOrb');
-const startBtn       = document.getElementById('startBtn');
-const stopBtn        = document.getElementById('stopBtn');
-const alertBox       = document.getElementById('alertBox');
-const eventLog       = document.getElementById('eventLog');
-const settingsBtn    = document.getElementById('settingsBtn');
-const settingsPanel  = document.getElementById('settingsPanel');
-const notifSetting   = document.getElementById('notifSetting');
-const darkSetting    = document.getElementById('darkSetting');
+const statusEl        = document.getElementById('status');
+const statusOrb       = document.getElementById('statusOrb');
+const startBtn        = document.getElementById('startBtn');
+const stopBtn         = document.getElementById('stopBtn');
+const alertBox        = document.getElementById('alertBox');
+const eventLog        = document.getElementById('eventLog');
+const settingsBtn     = document.getElementById('settingsBtn');
+const settingsPanel   = document.getElementById('settingsPanel');
+const notifSetting    = document.getElementById('notifSetting');
+const darkSetting     = document.getElementById('darkSetting');
 const thresholdSlider = document.getElementById('thresholdSlider');
-const thresholdVal   = document.getElementById('thresholdVal');
-const clearLogBtn    = document.getElementById('clearLog');
+const thresholdVal    = document.getElementById('thresholdVal');
+const clearLogBtn     = document.getElementById('clearLog');
 
-// ── Config ────────────────────────────────────────────────────────────────────
-// YAMNet operates at 16 kHz. We collect ~1.5 s of audio and run inference
-// every 750 ms (sliding window with 50% overlap).
-const YAMNET_SR        = 16000;
-const WINDOW_SECS      = 1.5;
-const WINDOW_SAMPLES   = YAMNET_SR * WINDOW_SECS;   // 24 000 samples
-const INFERENCE_MS     = 750;
-const COOLDOWN         = 3000;
+// ── Sound definitions ─────────────────────────────────────────────────────────
+// tier: 'danger' = red alert, 'warn' = amber, 'info' = blue
+const SOUNDS = [
+  { id: 'smoke',     idx: 393, label: 'Smoke Detector',       emoji: '🚨', tier: 'danger', notif: 'Smoke detector going off!' },
+  { id: 'siren',     idx: 390, label: 'Siren',                emoji: '🚨', tier: 'danger', notif: 'Siren detected nearby.' },
+  { id: 'glass',     idx: 437, label: 'Glass Shatter',        emoji: '💥', tier: 'danger', notif: 'Glass breaking detected!' },
+  { id: 'baby',      idx:  22, label: 'Baby Crying',          emoji: '👶', tier: 'warn',   notif: 'Baby crying detected.' },
+  { id: 'vehhorn',   idx: 302, label: 'Vehicle Horn',         emoji: '📯', tier: 'warn',   notif: 'Vehicle horn detected.' },
+  { id: 'trainhorn', idx: 325, label: 'Train Horn',           emoji: '🚂', tier: 'warn',   notif: 'Train horn detected.' },
+  { id: 'reversing', idx: 313, label: 'Reversing Beeps',      emoji: '🔁', tier: 'warn',   notif: 'Reversing vehicle detected.' },
+  { id: 'doorbell',  idx: 350, label: 'Doorbell',             emoji: '🔔', tier: 'info',   notif: 'Someone rang the doorbell.' },
+  { id: 'knock',     idx: 353, label: 'Knock',                emoji: '✊', tier: 'info',   notif: 'Knock at the door detected.' },
+  { id: 'phone',     idx: 384, label: 'Telephone Ringing',    emoji: '📞', tier: 'info',   notif: 'Telephone ringing.' },
+  { id: 'alarm',     idx: 389, label: 'Alarm Clock',          emoji: '⏰', tier: 'info',   notif: 'Alarm clock going off.' },
+  { id: 'buzzer',    idx: 392, label: 'Buzzer',               emoji: '📳', tier: 'info',   notif: 'Buzzer detected.' },
+  { id: 'microwave', idx: 362, label: 'Microwave',            emoji: '📡', tier: 'info',   notif: 'Microwave beep detected.' },
+  { id: 'dog',       idx:  74, label: 'Dog Barking',          emoji: '🐕', tier: 'info',   notif: 'Dog barking detected.' },
+  { id: 'vacuum',    idx: 371, label: 'Vacuum Cleaner',       emoji: '🌀', tier: 'info',   notif: 'Vacuum cleaner detected.' },
+];
+
+// ── Audio / model config ──────────────────────────────────────────────────────
+const YAMNET_SR      = 16000;
+const WINDOW_SECS    = 1.5;
+const WINDOW_SAMPLES = YAMNET_SR * WINDOW_SECS;
+const INFERENCE_MS   = 750;
+const COOLDOWN       = 3000;
 const YAMNET_MODEL_URL = 'https://tfhub.dev/google/tfjs-model/yamnet/tfjs/1';
-const CLASS_MAP_URL    = 'https://raw.githubusercontent.com/tensorflow/models/master/research/audioset/yamnet/yamnet_class_map.csv';
-
-// Known YAMNet class indices (from the official yamnet_class_map.csv).
-// Used as a fallback if the CSV can't be fetched at runtime.
-const FALLBACK_INDICES = { doorbell: 379, fireAlarm: 401, smokeAlarm: 400 };
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let model         = null;
-let classIndices  = { ...FALLBACK_INDICES };
 let audioCtx      = null;
 let sourceNode    = null;
 let processorNode = null;
-let rawSamples    = [];      // ring-buffer at native sample rate
+let rawSamples    = [];
 let nativeSR      = 44100;
 let inferenceTimer = null;
 let listening     = false;
 let lastTrigger   = 0;
 let THRESHOLD     = 0.20;
+
+// Per-sound enable state (all on by default)
+const enabled = Object.fromEntries(SOUNDS.map(s => [s.id, true]));
+
+// ── Settings panel — build sound toggles dynamically ─────────────────────────
+function buildSoundToggles() {
+  const container = document.getElementById('soundToggles');
+  if (!container) return;
+
+  const groups = [
+    { label: '🚨 Emergency',  tier: 'danger' },
+    { label: '⚠️ Traffic & Safety', tier: 'warn' },
+    { label: 'ℹ️ Everyday',   tier: 'info'   },
+  ];
+
+  groups.forEach(g => {
+    const sounds = SOUNDS.filter(s => s.tier === g.tier);
+    const header = document.createElement('div');
+    header.className = 'toggle-group-label';
+    header.textContent = g.label;
+    container.appendChild(header);
+
+    sounds.forEach(s => {
+      const row = document.createElement('div');
+      row.className = 'setting-row sound-row';
+      row.innerHTML = `
+        <div class="setting-label">${s.emoji} ${s.label}</div>
+        <label class="toggle">
+          <input type="checkbox" id="snd-${s.id}" checked>
+          <span class="toggle-slider"></span>
+        </label>`;
+      container.appendChild(row);
+
+      row.querySelector(`#snd-${s.id}`).addEventListener('change', (e) => {
+        enabled[s.id] = e.target.checked;
+      });
+    });
+  });
+}
 
 // ── UI helpers ────────────────────────────────────────────────────────────────
 function addLog(msg) {
@@ -65,89 +116,53 @@ thresholdSlider.addEventListener('input', () => {
 });
 
 let alertTimeout;
-function showAlert(type, message) {
+function showAlert(sound, score) {
   clearTimeout(alertTimeout);
   alertBox.style.display = 'block';
-  alertBox.className = type === 'door' ? 'alert-door' : 'alert-fire';
-  alertBox.textContent = (type === 'door' ? '🔔  ' : '🔥  ') + message;
+  alertBox.className = `alert-${sound.tier}`;
+  alertBox.textContent = `${sound.emoji}  ${sound.label} detected (${score.toFixed(3)})`;
   alertBox.style.animation = 'none';
   void alertBox.offsetWidth;
   alertBox.style.animation = '';
   alertTimeout = setTimeout(() => { alertBox.style.display = 'none'; }, 8000);
 }
 
-async function sendNotification(title, body) {
+async function sendNotification(sound) {
   if (!notifSetting.checked) return;
   if (!('Notification' in window)) return;
   if (Notification.permission === 'default') await Notification.requestPermission();
-  if (Notification.permission === 'granted') new Notification(title, { body });
+  if (Notification.permission === 'granted')
+    new Notification(`${sound.emoji} ${sound.label}`, { body: sound.notif });
 }
 
-function playFireTone() {
+function playTone(tier) {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
-    osc.frequency.value = 880;
-    osc.type = 'square';
+    osc.frequency.value = tier === 'danger' ? 880 : tier === 'warn' ? 660 : 440;
+    osc.type = tier === 'danger' ? 'square' : 'sine';
     osc.connect(ctx.destination);
     osc.start();
-    setTimeout(() => osc.stop(), 600);
+    setTimeout(() => osc.stop(), 400);
   } catch (e) {}
 }
 
-// ── YAMNet class map ──────────────────────────────────────────────────────────
-// Attempt to fetch the official class map CSV and resolve indices by name.
-// Falls back to hardcoded FALLBACK_INDICES if the fetch fails.
-async function resolveClassIndices() {
-  try {
-    const resp = await fetch(CLASS_MAP_URL, { cache: 'force-cache' });
-    if (!resp.ok) throw new Error('HTTP ' + resp.status);
-    const csv = await resp.text();
-    const rows = csv.trim().split('\n').slice(1); // skip header
-    const names = rows.map(r => r.split(',').slice(2).join(',').replace(/^"|"$/g, '').trim());
-
-    const find = (pattern) => names.findIndex(n => pattern.test(n));
-    const di = find(/^doorbell$/i);
-    const fi = find(/^fire alarm$/i);
-    const si = find(/^smoke detector/i);
-
-    if (di !== -1) classIndices.doorbell   = di;
-    if (fi !== -1) classIndices.fireAlarm  = fi;
-    if (si !== -1) classIndices.smokeAlarm = si;
-
-    addLog(`Class map loaded — Doorbell: ${classIndices.doorbell}, Fire alarm: ${classIndices.fireAlarm}`);
-  } catch (err) {
-    addLog(`Class map fetch failed (${err.message}), using fallback indices.`);
-  }
-}
-
-// ── Model loading ─────────────────────────────────────────────────────────────
+// ── Model ─────────────────────────────────────────────────────────────────────
 async function loadModel() {
   statusEl.textContent = 'Loading YAMNet…';
   addLog('Fetching YAMNet from TF Hub…');
-
-  await resolveClassIndices();
-
   model = await tf.loadGraphModel(YAMNET_MODEL_URL, { fromTFHub: true });
-  addLog('YAMNet ready.');
+  addLog('YAMNet ready — monitoring 15 sound classes.');
   statusEl.textContent = 'Ready';
 }
 
-// ── Audio resampling ──────────────────────────────────────────────────────────
-// Uses OfflineAudioContext to accurately resample a Float32Array from
-// `fromSR` Hz down to `toSR` Hz (16 000 for YAMNet).
+// ── Resampling ────────────────────────────────────────────────────────────────
 async function resampleTo16k(samples, fromSR) {
   if (fromSR === YAMNET_SR) return samples;
-
-  const inLen  = samples.length;
-  const outLen = Math.ceil(inLen * YAMNET_SR / fromSR);
-
-  // Build a source buffer at the native rate
-  const tmpCtx = new OfflineAudioContext(1, inLen, fromSR);
-  const srcBuf = tmpCtx.createBuffer(1, inLen, fromSR);
+  const outLen = Math.ceil(samples.length * YAMNET_SR / fromSR);
+  const tmpCtx = new OfflineAudioContext(1, samples.length, fromSR);
+  const srcBuf = tmpCtx.createBuffer(1, samples.length, fromSR);
   srcBuf.getChannelData(0).set(samples);
-
-  // Render at 16 kHz using the browser's high-quality SRC
   const resCtx = new OfflineAudioContext(1, outLen, YAMNET_SR);
   const src = resCtx.createBufferSource();
   src.buffer = srcBuf;
@@ -161,7 +176,6 @@ async function resampleTo16k(samples, fromSR) {
 async function runInference() {
   if (!model || !listening) return;
 
-  // Snap a window of raw (native-rate) samples
   const needed = Math.ceil(nativeSR * WINDOW_SECS);
   if (rawSamples.length < needed) return;
 
@@ -170,16 +184,12 @@ async function runInference() {
   let waveform, scores16, meanScores, scoresArr;
   try {
     const samples16 = await resampleTo16k(snap, nativeSR);
-
-    // Clamp to [-1, 1] just in case
-    const clamped = samples16.map(v => Math.max(-1, Math.min(1, v)));
-
-    waveform   = tf.tensor1d(clamped);
-    // YAMNet returns [scores, embeddings, spectrogram] for the TF Hub graph model
-    const out  = model.execute({ 'waveform': waveform });
-    scores16   = Array.isArray(out) ? out[0] : out;         // [frames, 521]
-    meanScores = tf.mean(scores16, 0);                       // [521]
-    scoresArr  = await meanScores.array();
+    const clamped   = samples16.map(v => Math.max(-1, Math.min(1, v)));
+    waveform    = tf.tensor1d(clamped);
+    const out   = model.execute({ waveform });
+    scores16    = Array.isArray(out) ? out[0] : out;
+    meanScores  = tf.mean(scores16, 0);
+    scoresArr   = await meanScores.array();
   } catch (err) {
     addLog('Inference error: ' + err.message);
     return;
@@ -192,25 +202,23 @@ async function runInference() {
   const now = Date.now();
   if (now - lastTrigger <= COOLDOWN) return;
 
-  const doorbellScore = scoresArr[classIndices.doorbell]   ?? 0;
-  const fireScore     = scoresArr[classIndices.fireAlarm]  ?? 0;
-  const smokeScore    = scoresArr[classIndices.smokeAlarm] ?? 0;
-  const maxFireLike   = Math.max(fireScore, smokeScore);
-
-  if (doorbellScore >= THRESHOLD || maxFireLike >= THRESHOLD) {
-    lastTrigger = now;
-    if (doorbellScore >= maxFireLike && doorbellScore >= THRESHOLD) {
-      const p = doorbellScore.toFixed(3);
-      showAlert('door', `Doorbell detected (${p})`);
-      addLog(`Doorbell — score ${p}`);
-      sendNotification('Doorbell Alert', 'Someone rang the doorbell.');
-    } else {
-      const p = maxFireLike.toFixed(3);
-      showAlert('fire', `FIRE ALARM detected (${p})`);
-      addLog(`FIRE ALARM — score ${p}`);
-      playFireTone();
-      sendNotification('Fire Alarm', 'Fire alarm detected in the area.');
+  // Find the highest-scoring enabled sound that exceeds threshold
+  let best = null, bestScore = 0;
+  for (const sound of SOUNDS) {
+    if (!enabled[sound.id]) continue;
+    const score = scoresArr[sound.idx] ?? 0;
+    if (score >= THRESHOLD && score > bestScore) {
+      best = sound;
+      bestScore = score;
     }
+  }
+
+  if (best) {
+    lastTrigger = now;
+    showAlert(best, bestScore);
+    addLog(`${best.emoji} ${best.label} — score ${bestScore.toFixed(3)}`);
+    playTone(best.tier);
+    sendNotification(best);
   }
 }
 
@@ -219,7 +227,6 @@ async function startListening() {
   if (!model) await loadModel();
   if (listening) return;
 
-  // Request microphone
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
@@ -229,20 +236,18 @@ async function startListening() {
     return;
   }
 
-  audioCtx   = new (window.AudioContext || window.webkitAudioContext)();
-  nativeSR   = audioCtx.sampleRate;
-  rawSamples = [];
-
+  audioCtx      = new (window.AudioContext || window.webkitAudioContext)();
+  nativeSR      = audioCtx.sampleRate;
+  rawSamples    = [];
   sourceNode    = audioCtx.createMediaStreamSource(stream);
   processorNode = audioCtx.createScriptProcessor(4096, 1, 1);
 
-  const maxBuf = nativeSR * 6; // keep 6 s of audio in memory
+  const maxBuf = nativeSR * 6;
   processorNode.onaudioprocess = (e) => {
     const chunk = e.inputBuffer.getChannelData(0);
     rawSamples.push(...chunk);
-    if (rawSamples.length > maxBuf) {
+    if (rawSamples.length > maxBuf)
       rawSamples = rawSamples.slice(rawSamples.length - maxBuf);
-    }
   };
 
   sourceNode.connect(processorNode);
@@ -251,12 +256,11 @@ async function startListening() {
   listening = true;
   inferenceTimer = setInterval(runInference, INFERENCE_MS);
 
-  startBtn.disabled = false;  // keep enabled so user can re-click (no-op)
   startBtn.disabled = true;
   stopBtn.disabled  = false;
   statusEl.textContent = 'Listening…';
   statusOrb.classList.add('listening');
-  addLog(`Listening at ${nativeSR} Hz, resampling to ${YAMNET_SR} Hz.`);
+  addLog(`Listening at ${nativeSR} Hz → resampling to ${YAMNET_SR} Hz.`);
 }
 
 function stopListening() {
@@ -278,3 +282,6 @@ function stopListening() {
 
 startBtn.onclick = startListening;
 stopBtn.onclick  = stopListening;
+
+// Init
+buildSoundToggles();
