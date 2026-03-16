@@ -300,21 +300,29 @@ async function startListening() {
   try { stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false }); }
   catch (e) { addLog('Mic error: ' + e.message); statusEl.textContent = 'Mic denied'; return; }
 
-  audioCtx = new AudioContext();
-  await audioCtx.resume(); // ensure context is running after user gesture
+  audioCtx = new AudioContext({ latencyHint: 'playback' });
+  await audioCtx.resume();
   nativeSR = audioCtx.sampleRate;
   samples  = [];
 
   srcNode  = audioCtx.createMediaStreamSource(stream);
   procNode = audioCtx.createScriptProcessor(4096, 1, 1);
+
+  // Connect through a silent gain node — avoids mic feedback to speakers
+  // which causes the "audio device error" on many browsers
+  const silentGain = audioCtx.createGain();
+  silentGain.gain.value = 0;
+
   const maxBuf = nativeSR * 6;
   procNode.onaudioprocess = e => {
     const chunk = e.inputBuffer.getChannelData(0);
     samples.push(...chunk);
     if (samples.length > maxBuf) samples = samples.slice(samples.length - maxBuf);
   };
+
   srcNode.connect(procNode);
-  procNode.connect(audioCtx.destination);
+  procNode.connect(silentGain);
+  silentGain.connect(audioCtx.destination);
 
   listening = true;
   timer = setInterval(runInference, POLL_MS);
