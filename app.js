@@ -305,8 +305,21 @@ async function startListening() {
     nativeSR = audioCtx.sampleRate;
     samples  = [];
 
-    // Load the AudioWorklet processor from the same directory
-    await audioCtx.audioWorklet.addModule('processor.js');
+    // Inline the worklet as a blob so no external file is needed
+    const workletCode = `
+      class SampleCollector extends AudioWorkletProcessor {
+        process(inputs) {
+          const ch = inputs[0]?.[0];
+          if (ch) this.port.postMessage(ch.slice());
+          return true;
+        }
+      }
+      registerProcessor('sample-collector', SampleCollector);
+    `;
+    const blob = new Blob([workletCode], { type: 'application/javascript' });
+    const blobURL = URL.createObjectURL(blob);
+    await audioCtx.audioWorklet.addModule(blobURL);
+    URL.revokeObjectURL(blobURL);
 
     srcNode  = audioCtx.createMediaStreamSource(stream);
     procNode = new AudioWorkletNode(audioCtx, 'sample-collector');
