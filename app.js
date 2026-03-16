@@ -15,6 +15,30 @@ const firebaseConfig = {
 const fbApp  = initializeApp(firebaseConfig);
 const auth   = getAuth(fbApp);
 
+
+// ── EmailJS ───────────────────────────────────────────────────────────────────
+const EMAILJS_SERVICE_ID  = 'TSA-Sound-Detector';
+const EMAILJS_TEMPLATE_ID = 'template_fa9wwjj';
+const EMAILJS_PUBLIC_KEY  = 'RHqaBdMrcFqQqpQsq';
+
+async function sendEmail(sound, score) {
+  if (!emailSetting.checked) return;
+  const toEmail = emailAddressInput.value.trim();
+  if (!toEmail) return;
+  try {
+    await emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, {
+      to_email: toEmail,
+      sound:    sound.label,
+      emoji:    sound.emoji,
+      score:    score.toFixed(3),
+      time:     new Date().toLocaleString(),
+    }, EMAILJS_PUBLIC_KEY);
+    addLog(`📧 Email sent for ${sound.label}`);
+  } catch (e) {
+    addLog(`📧 Email failed: ${e.text || e.message}`);
+  }
+}
+
 // ── Auth DOM ──────────────────────────────────────────────────────────────────
 const authScreen       = document.getElementById('authScreen');
 const mainApp          = document.getElementById('mainApp');
@@ -131,6 +155,8 @@ const darkSetting     = document.getElementById('darkSetting');
 const thresholdSlider = document.getElementById('thresholdSlider');
 const thresholdVal    = document.getElementById('thresholdVal');
 const clearLogBtn     = document.getElementById('clearLog');
+const emailSetting    = document.getElementById('emailSetting');
+const emailAddressInput = document.getElementById('emailAddress');
 
 // ── Sound toggles ─────────────────────────────────────────────────────────────
 (function buildToggles() {
@@ -255,6 +281,7 @@ async function runInference() {
     addLog(`${best.emoji} ${best.label} — score ${bestScore.toFixed(3)}`);
     beep(best.tier);
     notify(best);
+    sendEmail(best, bestScore);
   }
 }
 
