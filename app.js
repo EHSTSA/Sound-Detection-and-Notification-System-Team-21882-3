@@ -1,9 +1,7 @@
 import { initializeApp }                       from "https://www.gstatic.com/firebasejs/12.10.0/firebase-app.js";
 import { getAuth, onAuthStateChanged, signOut,
          signInWithEmailAndPassword,
-         createUserWithEmailAndPassword,
-         GoogleAuthProvider, signInWithRedirect,
-         getRedirectResult } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
+         createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/12.10.0/firebase-auth.js";
 
 // ── Firebase ──────────────────────────────────────────────────────────────────
 const firebaseConfig = {
@@ -16,7 +14,6 @@ const firebaseConfig = {
 };
 const fbApp  = initializeApp(firebaseConfig);
 const auth   = getAuth(fbApp);
-const gProvider = new GoogleAuthProvider();
 
 // ── Auth DOM ──────────────────────────────────────────────────────────────────
 const authScreen       = document.getElementById('authScreen');
@@ -30,7 +27,6 @@ const passInput        = document.getElementById('passInput');
 const passConfirmInput = document.getElementById('passConfirmInput');
 const signInBtn        = document.getElementById('signInBtn');
 const signUpBtn        = document.getElementById('signUpBtn');
-const googleBtn        = document.getElementById('googleBtn');
 const signOutBtn       = document.getElementById('signOutBtn');
 
 // ── Auth helpers ──────────────────────────────────────────────────────────────
@@ -86,18 +82,8 @@ signUpBtn.onclick = async () => {
   finally   { setBusy(signUpBtn, false); }
 };
 
-googleBtn.onclick = async () => {
-  authErr('');
-  setBusy(googleBtn, true);
-  googleBtn.textContent = 'Redirecting…';
-  try { await signInWithRedirect(auth, gProvider); }
-  catch (e) { authErr(niceError(e.code)); setBusy(googleBtn, false); }
-};
 
 signOutBtn.onclick = () => { stopListening(); signOut(auth); };
-
-// Handle redirect result when returning from Google sign-in
-getRedirectResult(auth).catch(e => { authErr(niceError(e.code)); });
 
 onAuthStateChanged(auth, user => {
   if (user) {
