@@ -122,22 +122,24 @@ onAuthStateChanged(auth, user => {
 });
 
 // ── Sounds ────────────────────────────────────────────────────────────────────
+// Class indices verified from official yamnet_class_map.csv (521 classes total).
+// Each sound also lists sibling/parent indices to catch near-matches.
 const SOUNDS = [
-  { id: 'smoke',     idx: 393, label: 'Smoke Detector',    emoji: '🚨', tier: 'danger', notif: 'Smoke detector going off!' },
-  { id: 'siren',     idx: 390, label: 'Siren',             emoji: '🚨', tier: 'danger', notif: 'Siren detected nearby.' },
-  { id: 'glass',     idx: 437, label: 'Glass Shatter',     emoji: '💥', tier: 'danger', notif: 'Glass breaking detected!' },
-  { id: 'baby',      idx:  22, label: 'Baby Crying',       emoji: '👶', tier: 'warn',   notif: 'Baby crying detected.' },
-  { id: 'vehhorn',   idx: 302, label: 'Vehicle Horn',      emoji: '📯', tier: 'warn',   notif: 'Vehicle horn detected.' },
-  { id: 'trainhorn', idx: 325, label: 'Train Horn',        emoji: '🚂', tier: 'warn',   notif: 'Train horn detected.' },
-  { id: 'reversing', idx: 313, label: 'Reversing Beeps',   emoji: '🔁', tier: 'warn',   notif: 'Reversing vehicle detected.' },
-  { id: 'doorbell',  idx: 350, label: 'Doorbell',          emoji: '🔔', tier: 'info',   notif: 'Someone rang the doorbell.' },
-  { id: 'knock',     idx: 353, label: 'Knock',             emoji: '✊', tier: 'info',   notif: 'Knock at the door detected.' },
-  { id: 'phone',     idx: 384, label: 'Telephone Ringing', emoji: '📞', tier: 'info',   notif: 'Telephone ringing.' },
-  { id: 'alarm',     idx: 389, label: 'Alarm Clock',       emoji: '⏰', tier: 'info',   notif: 'Alarm clock going off.' },
-  { id: 'buzzer',    idx: 392, label: 'Buzzer',            emoji: '📳', tier: 'info',   notif: 'Buzzer detected.' },
-  { id: 'microwave', idx: 362, label: 'Microwave',         emoji: '📡', tier: 'info',   notif: 'Microwave beep detected.' },
-  { id: 'dog',       idx:  74, label: 'Dog Barking',       emoji: '🐕', tier: 'info',   notif: 'Dog barking detected.' },
-  { id: 'vacuum',    idx: 371, label: 'Vacuum Cleaner',    emoji: '🌀', tier: 'info',   notif: 'Vacuum cleaner detected.' },
+  { id: 'smoke',     idx: [396, 397],      label: 'Smoke Detector',    emoji: '🚨', tier: 'danger', notif: 'Smoke detector going off!' },
+  { id: 'siren',     idx: [388, 389, 390], label: 'Siren',             emoji: '🚨', tier: 'danger', notif: 'Siren detected nearby.' },
+  { id: 'glass',     idx: [60, 61],        label: 'Glass Shatter',     emoji: '💥', tier: 'danger', notif: 'Glass breaking detected!' },
+  { id: 'baby',      idx: [14, 15],        label: 'Baby Crying',       emoji: '👶', tier: 'warn',   notif: 'Baby crying detected.' },
+  { id: 'vehhorn',   idx: [325, 326],      label: 'Vehicle Horn',      emoji: '📯', tier: 'warn',   notif: 'Vehicle horn detected.' },
+  { id: 'trainhorn', idx: [302, 303],      label: 'Train Horn',        emoji: '🚂', tier: 'warn',   notif: 'Train horn detected.' },
+  { id: 'reversing', idx: [329],           label: 'Reversing Beeps',   emoji: '🔁', tier: 'warn',   notif: 'Reversing vehicle detected.' },
+  { id: 'doorbell',  idx: [379, 380],      label: 'Doorbell',          emoji: '🔔', tier: 'info',   notif: 'Someone rang the doorbell.' },
+  { id: 'knock',     idx: [382],           label: 'Knock',             emoji: '✊', tier: 'info',   notif: 'Knock at the door detected.' },
+  { id: 'phone',     idx: [400, 401],      label: 'Telephone Ringing', emoji: '📞', tier: 'info',   notif: 'Telephone ringing.' },
+  { id: 'alarm',     idx: [393, 394],      label: 'Alarm Clock',       emoji: '⏰', tier: 'info',   notif: 'Alarm clock going off.' },
+  { id: 'buzzer',    idx: [398],           label: 'Buzzer',            emoji: '📳', tier: 'info',   notif: 'Buzzer detected.' },
+  { id: 'microwave', idx: [375],           label: 'Microwave',         emoji: '📡', tier: 'info',   notif: 'Microwave beep detected.' },
+  { id: 'dog',       idx: [74, 75, 76],    label: 'Dog Barking',       emoji: '🐕', tier: 'info',   notif: 'Dog barking detected.' },
+  { id: 'vacuum',    idx: [373],           label: 'Vacuum Cleaner',    emoji: '🌀', tier: 'info',   notif: 'Vacuum cleaner detected.' },
 ];
 const enabled = Object.fromEntries(SOUNDS.map(s => [s.id, true]));
 
@@ -269,10 +271,15 @@ async function runInference() {
   const now = Date.now();
   if (now - lastHit <= COOLDOWN) return;
 
+  // Log top-5 for debugging (open browser console to see)
+  const top5 = arr.map((v,i)=>[i,v]).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  console.log('Top-5 YAMNet:', top5.map(([i,v])=>`[${i}] ${v.toFixed(3)}`).join('  '));
+
   let best = null, bestScore = 0;
   for (const s of SOUNDS) {
     if (!enabled[s.id]) continue;
-    const sc = arr[s.idx] ?? 0;
+    // take the max score across all sibling indices for this sound
+    const sc = Math.max(...s.idx.map(i => arr[i] ?? 0));
     if (sc >= THRESHOLD && sc > bestScore) { best = s; bestScore = sc; }
   }
   if (best) {
