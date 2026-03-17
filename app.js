@@ -312,16 +312,11 @@ async function startListening() {
   const maxBuf = nativeSR * 6;
   procNode.onaudioprocess = e => {
     const chunk = e.inputBuffer.getChannelData(0);
-    for (let i = 0; i < chunk.length; i++) samples.push(chunk[i]);
-    if (samples.length > maxBuf) samples.splice(0, samples.length - maxBuf);
+    samples.push(...chunk);
+    if (samples.length > maxBuf) samples = samples.slice(samples.length - maxBuf);
   };
-
-  // Must connect to destination for onaudioprocess to fire, but mute output
-  const mute = audioCtx.createGain();
-  mute.gain.value = 0;
   srcNode.connect(procNode);
-  procNode.connect(mute);
-  mute.connect(audioCtx.destination);
+  procNode.connect(audioCtx.destination);
 
   listening = true;
   timer = setInterval(runInference, POLL_MS);
