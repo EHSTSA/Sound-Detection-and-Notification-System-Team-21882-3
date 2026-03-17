@@ -190,8 +190,6 @@ const darkSetting = document.getElementById("darkSetting");
 const thresholdSlider = document.getElementById("thresholdSlider");
 const thresholdVal = document.getElementById("thresholdVal");
 const clearLogBtn = document.getElementById("clearLog");
-const emailSetting = document.getElementById("emailSetting");
-const emailAddressInput = document.getElementById("emailAddress");
 
 // ── Sound toggles ─────────────────────────────────────────────────────────────
 (function buildToggles() {
@@ -281,14 +279,26 @@ async function notify(sound) {
 
 function beep(tier) {
   try {
-    const c = new AudioContext();
-    const o = c.createOscillator();
+    if (!audioCtx || audioCtx.state === "closed") return;
+
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+
     o.frequency.value = tier === "danger" ? 880 : tier === "warn" ? 660 : 440;
     o.type = tier === "danger" ? "square" : "sine";
-    o.connect(c.destination);
+
+    g.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+    g.gain.exponentialRampToValueAtTime(0.08, audioCtx.currentTime + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+
+    o.connect(g);
+    g.connect(audioCtx.destination);
+
     o.start();
-    setTimeout(() => o.stop(), 400);
-  } catch (_) {}
+    o.stop(audioCtx.currentTime + 0.4);
+  } catch (e) {
+    console.error("Beep error:", e);
+  }
 }
 
 // ── YAMNet ────────────────────────────────────────────────────────────────────
@@ -301,8 +311,10 @@ let THRESHOLD = 0.20;
 
 let model = null;
 let audioCtx = null;
+let micStream = null;
 let srcNode = null;
 let procNode = null;
+let silentGain = null;
 let samples = [];
 let nativeSR = 44100;
 let timer = null;
@@ -395,60 +407,103 @@ async function startListening() {
 
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false
+      },
+      video: false
+    });
   } catch (e) {
     addLog("Mic error: " + e.message);
     statusEl.textContent = "Mic denied";
     return;
   }
 
-  audioCtx = new AudioContext();
-  nativeSR = audioCtx.sampleRate;
-  samples = [];
+  try {
+    micStream = stream;
+    audioCtx = new AudioContext();
 
-  srcNode = audioCtx.createMediaStreamSource(stream);
-  procNode = audioCtx.createScriptProcessor(4096, 1, 1);
-
-  const maxBuf = nativeSR * 6;
-  procNode.onaudioprocess = e => {
-    const chunk = e.inputBuffer.getChannelData(0);
-    samples.push(...chunk);
-    if (samples.length > maxBuf) {
-      samples = samples.slice(samples.length - maxBuf);
+    if (audioCtx.state === "suspended") {
+      await audioCtx.resume();
     }
-  };
 
-  srcNode.connect(procNode);
-  procNode.connect(audioCtx.destination);
+    nativeSR = audioCtx.sampleRate;
+    samples = [];
 
-  listening = true;
-  timer = setInterval(runInference, POLL_MS);
-  startBtn.disabled = true;
-  stopBtn.disabled = false;
-  statusEl.textContent = "Listening…";
-  statusOrb.classList.add("listening");
-  addLog(`Mic active at ${nativeSR} Hz → 16 kHz.`);
+    srcNode = audioCtx.createMediaStreamSource(stream);
+    procNode = audioCtx.createScriptProcessor(4096, 1, 1);
+    silentGain = audioCtx.createGain();
+    silentGain.gain.value = 0;
+
+    const maxBuf = nativeSR * 6;
+    procNode.onaudioprocess = e => {
+      const chunk = e.inputBuffer.getChannelData(0);
+      samples.push(...chunk);
+      if (samples.length > maxBuf) {
+        samples = samples.slice(samples.length - maxBuf);
+      }
+    };
+
+    srcNode.connect(procNode);
+    procNode.connect(silentGain);
+    silentGain.connect(audioCtx.destination);
+
+    listening = true;
+    timer = setInterval(runInference, POLL_MS);
+    startBtn.disabled = true;
+    stopBtn.disabled = false;
+    statusEl.textContent = "Listening…";
+    statusOrb.classList.add("listening");
+    addLog(`Mic active at ${nativeSR} Hz → 16 kHz.`);
+  } catch (e) {
+    console.error("AudioContext/startListening error:", e);
+    addLog("Audio system error: " + e.message);
+    statusEl.textContent = "Audio error";
+    stopListening();
+  }
 }
 
 function stopListening() {
-  if (!listening) return;
-
   clearInterval(timer);
-  procNode?.disconnect();
-  srcNode?.disconnect();
-  audioCtx?.close();
+  timer = null;
+
+  try {
+    procNode && (procNode.onaudioprocess = null);
+    procNode?.disconnect();
+  } catch {}
+
+  try {
+    srcNode?.disconnect();
+  } catch {}
+
+  try {
+    silentGain?.disconnect();
+  } catch {}
+
+  try {
+    if (micStream) {
+      micStream.getTracks().forEach(track => track.stop());
+    }
+  } catch {}
+
+  try {
+    if (audioCtx && audioCtx.state !== "closed") {
+      audioCtx.close();
+    }
+  } catch {}
 
   procNode = null;
   srcNode = null;
+  silentGain = null;
+  micStream = null;
   audioCtx = null;
   samples = [];
   listening = false;
 
-  if (startBtn) {
-    startBtn.disabled = false;
-    stopBtn.disabled = true;
-  }
-
+  if (startBtn) startBtn.disabled = false;
+  if (stopBtn) stopBtn.disabled = true;
   if (statusEl) statusEl.textContent = "Stopped";
   if (statusOrb) statusOrb.classList.remove("listening");
 
