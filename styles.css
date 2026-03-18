@@ -270,3 +270,15 @@ input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; width: 16px;
   .btn-primary.full { grid-column: span 1; }
   .auth-card { padding: 28px 20px 24px; }
 }
+
+#flashOverlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background: white;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 9999;
+}
